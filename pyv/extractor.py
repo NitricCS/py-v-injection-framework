@@ -5,6 +5,7 @@ import pyv.isa as isa
 from pyv.util import getBit, getBits
 from pyv.log import logger
 from dataclasses import dataclass, field
+import time
 
 STOP_INSTR = 0xffffffff
 
@@ -60,6 +61,7 @@ class Extractor(Module):
 
         # set ready signal
         if inst == STOP_INSTR:
+            logger.info(f"Mode switch timestamp: {time.perf_counter()}")
             self.ready = True
         
         # set ready output
@@ -80,11 +82,10 @@ class Extractor(Module):
         
         # Get entropy bits from funct7
         if opcode == isa.OPCODES['OP']:
-            # if flush_ready:
-            #     entropy_list = []
             if self.active_out and not self.flush_bits and not flush_ready:
                 entropy = self.get_entropy_bits(funct7)
                 entropy_list.append(entropy)
+                logger.info(f"Adding entropy value {entropy} to register")
         self.eb_reg.next.write(entropy_list)
 
         # set flush signal

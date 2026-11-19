@@ -1,8 +1,8 @@
 # Modified Py-V
 
-This project is a modification of [Py-V](https://github.com/kyaso/py-v), a cycle-accurate RISC-V simulator and RTL modeling library written in Python.
+This project is a fork/modification of [Py-V](https://github.com/kyaso/py-v), a cycle-accurate RISC-V simulator and RTL modeling library written in Python.
 
-The modification adds instruction-based entropy extraction and simulation-time fault injection. It adds an entropy-capable core while retaining the regular core and the ability to execute ordinary binaries.
+The modification adds instruction-based entropy extraction and configurable instruction-level fault injection.
 
 ## Requirements
 
@@ -11,99 +11,147 @@ The modification adds instruction-based entropy extraction and simulation-time f
 - GNU Make
 - A standard RISC-V GNU toolchain using the `riscv64-unknown-elf-` prefix
 
-Install Python dependencies:
+Install dependencies:
 
-```
+```bash
 python3 -m pip install -r requirements.txt
 ```
 
 The RISC-V toolchain is only required to compile source programs. It is not required to run an already compiled `.bin` file.
 
+## Repository layout
+
+- `main.py` - top-level entry point. It selects which program helper should run.
+- `programs.py` - binary execution helpers and core selection.
+- `fi_test.py` - fault-injection test runner, result collection, SQLite storage, and plotting.
+- `pyv/` - simulator and core implementation.
+- `programs/` - source programs, build rules, and precompiled example binaries.
+- `test/` - pytest-based unit tests.
+- `docs/` - implementation and usage documentation.
+- `data/` - generated SQLite fault-injection results.
+- `figs/` - generated fault-injection plots.
+
+The `data/` and `figs/` directories are runtime output locations. They should be created before running result collection or plotting.
+
 ## Compile example programs
 
 From the `programs` directory:
 
-```
+```bash
 make
 ```
 
-The Makefile builds example programs for RV32I.
+The Makefile builds `loop_acc`, `fibonacci`, and `endless_loop` for RV32I.
 
-Source programs and generated binaries may be replaced with your own. The repository also contains precompiled regular and entropy-carrying example binaries.
+Source programs and generated binaries may be replaced with your own.
 
 ## Run a simulation
 
-Configure and run one example call in `main.py`:
+There is no separate CLI. Configure one call in `main.py`, then run:
 
-```
+```bash
 python3 main.py
 ```
 
-`execute_bin()` accepts the core type and binary path:
+The default entry point currently calls `programs.atoi()`.
+
+Program helpers and binary execution are implemented in `programs.py`. `execute_bin()` selects the core and optionally configures fault-injection parameters:
 
 ```python
-execute_bin(
-    core_type="single",
-    program_name="fibonacci",
-    path_to_bin="programs/fibonacci/fibonacci.bin",
-    num_cycles=140,
+fi_params = (30, 12, 2, "clear")
+
+programs.execute_bin(
+    core_type="single_entropy",
+    program_name="fibonacci with entropy",
+    path_to_bin="programs/fibonacci/fibonacci_e.bin",
+    num_cycles=178,
+    fi_params=fi_params,
 )
 ```
 
 Available core types:
 
-- `single`: regular Py-V core
-- `single_entropy`: modified core with entropy extraction
+- `single` - regular core
+- `single_entropy` - core with entropy extraction
 
-The example helpers in `main.py` demonstrate both core types, including `fibonacci()`, `fibonacci_entropy()`, `memset()`, `memset_entropy()`, `strcpy()`, and `strcpy_entropy()`.
+Example helpers include:
 
-Enable only one top-level example call in `main()` at a time.
+- `fibonacci()` / `fibonacci_entropy()`
+- `atoi()` / `atoi_entropy()`
+- `strcpy()` / `strcpy_entropy()`
+- `memset()` / `memset_entropy()`
+
+Enable or call only the example you want to run.
 
 ## Core and binary compatibility
 
-| Core | Binary | Supported behavior |
+| Core | Binary | Behavior |
 | --- | --- | --- |
 | `single` | Regular | Normal execution |
-| `single_entropy` | Regular | Backward-compatible normal execution; no entropy is extracted, so extraction remains inactive and the result is unchanged |
-| `single_entropy` | Entropy-carrying | Entropy extraction and normal program execution after the mode switch |
-| `single` | Entropy-carrying | Not supported; the regular core does not implement the modified ISA use |
+| `single_entropy` | Regular | Backward-compatible normal execution; no entropy is extracted |
+| `single_entropy` | Entropy-carrying | Entropy extraction followed by normal execution |
+| `single` | Entropy-carrying | Not supported |
 
 Backward compatibility means that regular binaries can run on the modified core.
 
+Entropy-carrying binaries require the STOP instruction `0xffffffff`. The modified core uses NOP instruction `0x00000013` while extraction is active and stores extracted entropy at memory address `1024`.
+
 ## Creating entropy-carrying binaries
 
-Entropy-carrying binaries are created outside the simulator using the entropy-injection utility:
-
-<https://github.com/owenmillwood/riscv-entropy_injection>
-
-A typical flow is:
+Use [riscv-entropy_injection](https://github.com/owenmillwood/riscv-entropy_injection) to place entropy into unused `funct7` bits:
 
 ```bash
-make -C programs fibonacci
-python3 riscv-binutils.py inject --image programs/fibonacci/fibonacci.out
-riscv64-unknown-elf-objcopy -O binary \
-  programs/fibonacci/fibonacci.out \
-  programs/fibonacci/fibonacci_e.bin
+python3 riscv-binutils.py inject --image strcpy.out
+riscv64-unknown-elf-objcopy -O binary strcpy.out strcpy_e.bin
 ```
 
-See [Entropy-carrying binaries](docs/entropy-binaries.md) for the complete workflow.
+See [Creating entropy-carrying binaries](docs/entropy-binaries.md).
 
 ## Fault injection
 
-The modified core supports instruction-level fault injection during simulation. Pass a fault-injection cycle to `execute_bin()` or to an example helper:
+Fault-injection parameters are passed as a tuple:
 
-```python
-fibonacci_entropy(core_type="single_entropy", fi_cycle=30)
+```text
+(fi_cycle, fi_index, num_bits, fi_type)
 ```
 
-The fault is applied to fetched instructions during the selected cycle. `main.py` also contains helpers for collecting fault outcomes and plotting results.
+Supported injection types are:
 
-## Documentation
+- `flip` - invert the selected bits
+- `set` - set the selected bits to one
+- `clear` - clear the selected bits to zero
 
-- [Modification implementation](docs/modifications.md)
-- [Creating entropy-carrying binaries](docs/entropy-binaries.md)
-- [Original Py-V project](https://github.com/kyaso/py-v)
+The fetch stage applies the fault before the instruction reaches the decode stage in both the regular and entropy-enabled cores.
+
+The high-level test runner is separate from normal program execution:
+
+```bash
+python3 fi_test.py
+```
+
+`fi_test.py`:
+
+- runs a program for a range of cycles
+- varies bit position and injection type
+- categorises the result
+- stores results in `data/fi.db`
+- saves result plots to `figs/`
+
+The database and required tables must be prepared for the selected program before the runner can insert results.
+
+See [Fault-injection testing](docs/fault-injection.md) for parameters, result categories, and runner configuration.
 
 ## Tests
 
-Run the test suite from the repository root using `pytest`.
+Run the unit test suite:
+
+```bash
+pytest
+```
+
+## Documentation
+
+- [Entropy and core modifications](docs/modifications.md)
+- [Creating entropy-carrying binaries](docs/entropy-binaries.md)
+- [Fault-injection testing](docs/fault-injection.md)
+- [Original Py-V project](https://github.com/kyaso/py-v)
