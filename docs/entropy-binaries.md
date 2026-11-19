@@ -2,7 +2,7 @@
 
 Entropy-carrying binaries place entropy in unused `funct7` bits of R-type instructions.
 
-The repository uses [riscv-entropy_injection](https://github.com/owenmillwood/riscv-entropy_injection) for this step.
+For this, [riscv-entropy_injection](https://github.com/owenmillwood/riscv-entropy_injection) is recommended.
 
 ## Prerequisites
 
