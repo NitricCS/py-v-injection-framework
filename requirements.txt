@@ -4,3 +4,5 @@ coverage
 flake8
 gitlint
 tabulate
+matplotlib
+numpy

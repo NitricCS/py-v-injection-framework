@@ -1,160 +1,109 @@
-# Py-V: A Cycle-accurate RISC-V CPU Simulator written in Python
+# Modified Py-V
 
-<p align="center">
-    <img src="https://img.shields.io/github/v/tag/kyaso/py-v">
-    <img src="https://img.shields.io/github/license/kyaso/py-v">
-</p>
+This project is a modification of [Py-V](https://github.com/kyaso/py-v), a cycle-accurate RISC-V simulator and RTL modeling library written in Python.
 
-Py-V is a cycle-accurate simulator for RISC-V CPUs, written in pure Python. It is also a (WIP) library for designing and modelling any digital hardware.
+The modification adds instruction-based entropy extraction and simulation-time fault injection. It adds an entropy-capable core while retaining the regular core and the ability to execute ordinary binaries.
 
-## Why Py-V?
+## Requirements
 
-- _Yes, it won't be performant_
-- **But**:
-  - It's _not_ yet another RISC-V emulator: it implements an actual CPU down to _register-transfer level_ (RTL)
-  - Cycle-accurate
-  - Helps to learn about CPU architecture
-    - Like a real hardware design, the CPUs are made from different modules that are connected with each other
-  - Python makes writing core models faster
-- I started doing this more as an experiment, to design an easy to use "hardware prototyping framework" with an integrated simulator
-  - A CPU was an obvious choice to test this idea
-  - Py-V can be used for _rapid prototyping_: High-level design flexibility by leveraging the language features of Python, with the possibility to go as low-level as Verilog/VHDL
-    - Similar projects are [PyRTL](https://ucsbarchlab.github.io/PyRTL/), [MyHDL](https://www.myhdl.org/), [nMigen](https://github.com/m-labs/nmigen), and [PyMTL](https://github.com/pymtl/pymtl3)
-  - I have not yet planned on how to convert a Py-V model into Verilog/VHDL, but that might be something interesting for the future
-  - Once the hardware modelling framework behind Py-V is mature enough, I am planning to migrate it to a new, separate library, and Py-V will just use the new library.
-    - For now, if you want to use the library to design your own systems follow the steps [below](#designing-your-own-systems)
+- Python 3.13 or newer
+- Python packages listed in `requirements.txt`
+- GNU Make
+- A standard RISC-V GNU toolchain using the `riscv64-unknown-elf-` prefix
 
-## Core models
+Install Python dependencies:
 
-As of now, there are the following core models:
+```
+python3 -m pip install -r requirements.txt
+```
 
-- Classic 5-stage RISC CPU (`SingleCycle`)
-  - Single-cycle
-  - 8 KiB memory
-  - Pipelined version planned
+The RISC-V toolchain is only required to compile source programs. It is not required to run an already compiled `.bin` file.
 
-## Running a test program
+## Compile example programs
 
-**Prerequisites**:
-
-- RISC-V toolchain
-- python3
-
-First, navigate to the `programs` directory, and compile the programs:
+From the `programs` directory:
 
 ```
 make
 ```
 
-Then, navigate back to the top-level directory, and start the simulation by running:
+The Makefile builds example programs for RV32I.
+
+Source programs and generated binaries may be replaced with your own. The repository also contains precompiled regular and entropy-carrying example binaries.
+
+## Run a simulation
+
+Configure and run one example call in `main.py`:
 
 ```
 python3 main.py
 ```
 
-By default, this will simulate the `fibonacci` and `loop_acc` test programs. The output should look something like this:
+`execute_bin()` accepts the core type and binary path:
 
-```
-$ python3 main.py
-===== LOOP_ACC =====
-* Creating core instance...
-* Loading binary...
-* Starting simulation...
-
-Simulation done at cycle 3000 after 0.11450981599773513s.
-
-x1 = 1000
-x2 = 1000
-x5 = 4096
-pc = 0x20
-mem@4096 =  ['0xe8', '0x3', '0x0', '0x0']
-
-===== FIBONACCI =====
-* Creating core instance...
-* Loading binary...
-* Starting simulation...
-
-Simulation done at cycle 3000 after 0.12019554300059099s.
-
-Result =  ['0x37', '0x0', '0x0', '0x0']
+```python
+execute_bin(
+    core_type="single",
+    program_name="fibonacci",
+    path_to_bin="programs/fibonacci/fibonacci.bin",
+    num_cycles=140,
+)
 ```
 
-_Note_: The simulation times can vary from machine to machine. Also, in the meantime (as of Jan 2022), I added logging which could additionally slow down the simulation. There still some work to do when it comes to runtime optimiztions!
+Available core types:
 
-### Adding custom programs
+- `single`: regular Py-V core
+- `single_entropy`: modified core with entropy extraction
 
-You can add your own programs by following the examples in `programs/`. To simulate, refer to `main.py` to see how the example programs are run. I know that having a command line interface here would be nice, but I didn't have time to implement that, but it's definitely on my wishlist!
+The example helpers in `main.py` demonstrate both core types, including `fibonacci()`, `fibonacci_entropy()`, `memset()`, `memset_entropy()`, `strcpy()`, and `strcpy_entropy()`.
 
-## Feature wishlist
+Enable only one top-level example call in `main()` at a time.
 
-Unordered (and probably incomplete) list of things I plan to integrate in the (near) future:
+## Core and binary compatibility
 
-- [ ] Pipelined core model
-- [ ] Exceptions
-  - Partial support implemented
-- [ ] Branch predictor
-- [ ] Caches
-- [ ] ...
+| Core | Binary | Supported behavior |
+| --- | --- | --- |
+| `single` | Regular | Normal execution |
+| `single_entropy` | Regular | Backward-compatible normal execution; no entropy is extracted, so extraction remains inactive and the result is unchanged |
+| `single_entropy` | Entropy-carrying | Entropy extraction and normal program execution after the mode switch |
+| `single` | Entropy-carrying | Not supported; the regular core does not implement the modified ISA use |
 
-## Designing your own systems
+Backward compatibility means that regular binaries can run on the modified core.
 
-Py-V also contains a library that can be used to model any digital hardware at RTL level. Although detailed documentation is currently underway, you can get started by cloning this repository and examining the examples in `pyv/stages.py` and `pyv/models`.
+## Creating entropy-carrying binaries
 
-Py-V is structured around the following building blocks:
+Entropy-carrying binaries are created outside the simulator using the entropy-injection utility:
 
-- **Modules**: Fundamental units of design encapsulating various hardware elements.
-  - Analogous to Verilog modules
-- **Ports**: Input and output interfaces connecting modules.
-- **Wires**: To connect ports
-  - Ports can also be connected *directly* without the need of a wire object (see examples)
-- **Registers**: Storage elements that capture and hold data.
-  - Yes, Py-V has *actual* register objects!
-- **Memories**: As the name suggests.
+<https://github.com/owenmillwood/riscv-entropy_injection>
 
-Py-V currently supports one implicit global **clock**. On each clock tick, all registers and memories within the design are synchronized.
+A typical flow is:
 
-Please refer to the API documentation for more information: https://kyaso.github.io/py-v/.
+```bash
+make -C programs fibonacci
+python3 riscv-binutils.py inject --image programs/fibonacci/fibonacci.out
+riscv64-unknown-elf-objcopy -O binary \
+  programs/fibonacci/fibonacci.out \
+  programs/fibonacci/fibonacci_e.bin
+```
 
----
+See [Entropy-carrying binaries](docs/entropy-binaries.md) for the complete workflow.
 
-## Under the hood
+## Fault injection
 
-This section is intended to explain how Py-V (and the language behind it) works internally. 🚧 I am still working on a proper documentation for Py-V, so currently there is no ETA on when this section will be finished.
+The modified core supports instruction-level fault injection during simulation. Pass a fault-injection cycle to `execute_bin()` or to an example helper:
 
-On the other hand, you can have a look into the source code as I tried to reduce complexity as much as possible, so the code should be almost self-documenting (otherwise please let me know!).
+```python
+fibonacci_entropy(core_type="single_entropy", fi_cycle=30)
+```
 
-### Source files
+The fault is applied to fetched instructions during the selected cycle. `main.py` also contains helpers for collecting fault outcomes and plotting results.
 
-`pyv/`. This is the package where the source files of Py-V are located.
+## Documentation
 
-- `clocked.py`: Contains base definitions of all clocked elements (e.g., memories, registers)
-- `defines.py`: Contains common definitions, constants, etc.
-- `isa.py`: Contains definitions for RISC-V ISA (opcodes, etc.)
-- `log.py`: Contains a basic logger
-- `mem.py`: Contains a simple behavioral memory model
-- `models/`: Contains different core models
-  - `model.py`: Base class for core models
-  - `singlecycle.py`: A basic 5-stage single-cycle RISC-V CPU
-- `module.py`: Abstract base class for all modules
-- `port.py`: Contains definitions for ports (Inputs, Outputs, Wires)
-- `reg.py`: Contains definitions for registers
-  - Also defines register file
-- `simulator.py`: Contains the simulator
-- `stages.py`: Module definitions for the various pipeline stages
-- `util.py`: Contains helper functions, and variables/constants
+- [Modification implementation](docs/modifications.md)
+- [Creating entropy-carrying binaries](docs/entropy-binaries.md)
+- [Original Py-V project](https://github.com/kyaso/py-v)
 
-`test/`. Here you can find [pytest](pytest.org)-based unit tests.
+## Tests
 
-`programs/`. This directory contains test programs that can be compiled, and later executed on a core model.
-
-- `common/`: Common source files needed for compiling
-- `endless_loop/`: As the name suggests
-  - Execution time is limited in `main.py` (see below)
-- `fibonacci/`: A non-recursive version of the Fibonacci algorithm.
-- `loop_acc/`: An assembly program that counts from 0 to 1000.
-
-`main.py`. Main execution file
-
-- Runs simulation using compiled binaries from `programs/`
-
-`doc/`. Contains documentation resources.
+Run the test suite from the repository root using `pytest`.
